@@ -261,7 +261,7 @@ public class Mirror : MonoBehaviour
         SetTexture(m_ReflectionTexture);
         buffer.name = "Postprocessing Buffer";
         if (addPostProcessingComponent) {
-            depthTexture = new RenderTexture(m_ReflectionTexture.width, m_ReflectionTexture.height, 16, RenderTextureFormat.RFloat, RenderTextureReadWrite.Default);
+            depthTexture = new RenderTexture(m_ReflectionTexture.width, m_ReflectionTexture.height, 24, RenderTextureFormat.RFloat, RenderTextureReadWrite.Default);
             buffer.GetTemporaryRT(ShaderIDs._TempTex, m_ReflectionTexture.descriptor);
             var edgeBlurAAMaterial = new Material(Shader.Find("Hidden/Mirror/AAEdgeBlur"));
             var fxaaMaterial = new Material(Shader.Find("Hidden/Mirror/FXAA"));
