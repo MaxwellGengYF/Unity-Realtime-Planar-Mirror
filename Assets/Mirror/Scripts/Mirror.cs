@@ -98,6 +98,9 @@ public class Mirror : MonoBehaviour
     public bool addPostProcessingComponent = false;
     public bool enableDepthOfField;
     public float smoothness = 50;
+    public bool enableDirectionBlur;
+    [Range(1,3)]
+    public int blurIterate;
     private const float roughOffset = 50f;
     private const float smoothOffset = 1e-5f;
     private Camera depthCam;
@@ -267,7 +270,15 @@ public class Mirror : MonoBehaviour
             var fxaaMaterial = new Material(Shader.Find("Hidden/Mirror/FXAA"));
             buffer.BlitSRT(BuiltinRenderTextureType.CameraTarget, ShaderIDs._TempTex, edgeBlurAAMaterial, 0);
             buffer.BlitSRT(ShaderIDs._TempTex, BuiltinRenderTextureType.CameraTarget, fxaaMaterial, 0);
-
+            if (enableDirectionBlur)
+            {
+                var directionBlurMaterial = new Material(Shader.Find("Hidden/RadiusBlur"));
+                for (int i = 0; i < blurIterate; ++i)
+                {
+                    buffer.BlitSRT(BuiltinRenderTextureType.CameraTarget, ShaderIDs._TempTex, directionBlurMaterial, 0);
+                    buffer.BlitSRT(ShaderIDs._TempTex, BuiltinRenderTextureType.CameraTarget, directionBlurMaterial, 0);
+                }
+            }
             depthCam = new GameObject("depthCam", typeof(Camera)).GetComponent<Camera>();
             SetDepthCamera();
             depthCam.renderingPath = RenderingPath.Forward;
@@ -284,10 +295,11 @@ public class Mirror : MonoBehaviour
             depthCam.clearFlags = CameraClearFlags.Color;
             depthCam.layerCullSpherical = enableSelfCullingDistance;
             if(enableSelfCullingDistance) depthCam.layerCullDistances = layerCullingDistances;
-            buffer.ReleaseTemporaryRT(ShaderIDs._TempTex);
+
             reflectionCamera.AddCommandBuffer(CameraEvent.AfterForwardAlpha, buffer);
             if(enableDepthOfField)
             dof = reflectionCamera.gameObject.AddComponent<DepthOfField>();
+            buffer.ReleaseTemporaryRT(ShaderIDs._TempTex);
         }
     }
 
@@ -336,7 +348,7 @@ public class Mirror : MonoBehaviour
     Vector3 normal;
     Vector4 reflectionPlane;
     Vector4 clipPlane;
-    Matrix4x4 reflection = Matrix4x4.zero;
+    Matrix4x4 reflection = Matrix4x4.identity;
     Matrix4x4 ref_WorldToCam;
     [System.NonSerialized]
     public bool isBaked = false;
@@ -350,6 +362,12 @@ public class Mirror : MonoBehaviour
     {
         SetTexture(m_ReflectionTexture);
     }
+
+    static float Dot(ref Vector3 left, ref Vector3 right)
+    {
+        return left.x * right.x + left.y * right.y + left.z * right.z;
+    }
+
     public void OnWillRenderObject()
     {
         if (s_InsideRendering || !render.enabled || isBaked)
@@ -357,23 +375,14 @@ public class Mirror : MonoBehaviour
         s_InsideRendering = true;
         isBaked = true;
         StartCoroutine(WaitTo());
-        if (cam != Camera.current)
+        if (cam != Camera.current && !Camera.current.orthographic)
         {
             cam = Camera.current;
             camT = cam.transform;
-            reflectionCamera.renderingPath = (renderQuality == RenderQuality.VeryLow) ? RenderingPath.VertexLit : cam.renderingPath;
             reflectionCamera.fieldOfView = cam.fieldOfView;
-            reflectionCamera.clearFlags = cam.clearFlags;
-            reflectionCamera.backgroundColor = cam.backgroundColor;
-            reflectionCamera.allowHDR = false;
-            reflectionCamera.allowMSAA = true;
-            reflectionCamera.orthographic = cam.orthographic;
             reflectionCamera.aspect = cam.aspect;
-            reflectionCamera.orthographicSize = cam.orthographicSize;
-            reflectionCamera.depthTextureMode = DepthTextureMode.None;
-            if (addPostProcessingComponent) SetDepthCamera();
         }
-        
+
         if (useDistanceCull && Vector3.SqrMagnitude(normalTrans.position - camT.position) > m_SqrMaxdistance)
         {
             s_InsideRendering = false;
@@ -393,28 +402,32 @@ public class Mirror : MonoBehaviour
         Vector3 localEuler = refT.localEulerAngles;
         localEuler.x *= -1;
         localEuler.z *= -1;
-        refT.localEulerAngles = localEuler;
         localPos.y *= -1;
+        refT.localEulerAngles = localEuler;
+        
         refT.localPosition = localPos;
         
         normal = normalTrans.up;
         pos = normalTrans.position;
-        float d = -Vector3.Dot(normal, pos) - m_ClipPlaneOffset;
+        float d = -Dot(ref normal, ref pos) - m_ClipPlaneOffset;
         reflectionPlane = new Vector4(normal.x, normal.y, normal.z, d);
-        CalculateReflectionMatrix(ref reflection, reflectionPlane);
+        CalculateReflectionMatrix(ref reflection, ref reflectionPlane);
         ref_WorldToCam = cam.worldToCameraMatrix * reflection;
         reflectionCamera.worldToCameraMatrix = ref_WorldToCam;
-        clipPlane = CameraSpacePlane(ref_WorldToCam, pos, normal, 1.0f);
+        clipPlane = CameraSpacePlane(ref ref_WorldToCam, ref pos, ref normal);
         reflectionCamera.projectionMatrix = cam.CalculateObliqueMatrix(clipPlane);
         GL.invertCulling = true;
-        if (addPostProcessingComponent && enableDepthOfField)
+        if (addPostProcessingComponent)
         {
-            dof.focus.farFalloff = smoothness;
-            UpdateDepthCamera();
-            Shader.SetGlobalVector(ShaderIDs._MirrorPos, normalTrans.position);
-            Shader.SetGlobalVector(ShaderIDs._MirrorNormal, normalTrans.up);
-            Shader.SetGlobalTexture(ShaderIDs._DepthTex, depthTexture);
-            depthCam.Render();
+            if (enableDepthOfField)
+            {
+                dof.focus.farFalloff = smoothness;
+                UpdateDepthCamera();
+                Shader.SetGlobalVector(ShaderIDs._MirrorPos, normalTrans.position);
+                Shader.SetGlobalVector(ShaderIDs._MirrorNormal, normalTrans.up);
+                Shader.SetGlobalTexture(ShaderIDs._DepthTex, depthTexture);
+                depthCam.Render();
+            }
         }
 #if UNITY_EDITOR
         if (renderQuality == RenderQuality.VeryLow)
@@ -432,16 +445,16 @@ public class Mirror : MonoBehaviour
         s_InsideRendering = false;
     }
 
-    private Vector4 CameraSpacePlane(Matrix4x4 worldToCameraMatrix, Vector3 pos, Vector3 normal, float sideSign)
+    private Vector4 CameraSpacePlane(ref Matrix4x4 worldToCameraMatrix, ref Vector3 pos, ref Vector3 normal)
     {
         Vector3 offsetPos = pos + normal * m_ClipPlaneOffset;
         Vector3 cpos = worldToCameraMatrix.MultiplyPoint3x4
 (offsetPos);
-        Vector3 cnormal = worldToCameraMatrix.MultiplyVector(normal).normalized * sideSign;
-        return new Vector4(cnormal.x, cnormal.y, cnormal.z, -Vector3.Dot(cpos, cnormal));
+        Vector3 cnormal = worldToCameraMatrix.MultiplyVector(normal).normalized;
+        return new Vector4(cnormal.x, cnormal.y, cnormal.z, -Dot(ref cpos, ref cnormal));
     }
 
-    private static void CalculateReflectionMatrix(ref Matrix4x4 reflectionMat, Vector4 plane)
+    private static void CalculateReflectionMatrix(ref Matrix4x4 reflectionMat, ref Vector4 plane)
     {
         reflectionMat.m00 = (1F - 2F * plane[0] * plane[0]);
         reflectionMat.m01 = (-2F * plane[0] * plane[1]);
@@ -457,10 +470,5 @@ public class Mirror : MonoBehaviour
         reflectionMat.m21 = (-2F * plane[2] * plane[1]);
         reflectionMat.m22 = (1F - 2F * plane[2] * plane[2]);
         reflectionMat.m23 = (-2F * plane[3] * plane[2]);
-
-        reflectionMat.m30 = 0F;
-        reflectionMat.m31 = 0F;
-        reflectionMat.m32 = 0F;
-        reflectionMat.m33 = 1F;
     }
 }

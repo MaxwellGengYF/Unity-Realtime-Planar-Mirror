@@ -10,4 +10,5 @@ public static class ShaderIDs{
     public static int _MirrorNormal = Shader.PropertyToID("_MirrorNormal");
     public static int _MirrorPos = Shader.PropertyToID("_MirrorPos");
     public static int _BlurOffset = Shader.PropertyToID("_BlurOffset");
+    public static int _Direction = Shader.PropertyToID("_Direction");
 }

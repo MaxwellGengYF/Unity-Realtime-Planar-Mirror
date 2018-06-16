@@ -16,7 +16,6 @@
 		_AlbedoBlend("Albedo Blend Rate", Range(0,1)) = 0.3
 		_DetailBump("Detail Bump(RGB) Mask(A)", 2D) = "bump"{}
 		_BumpBlend("Bump Blend Rate", Range(0,1)) = 0.3
-
 	}
 	SubShader {
 		Tags { "RenderType"="Opaque" }
@@ -94,7 +93,7 @@ inline float4 MirrorSpecular_Deferred (SurfaceOutputStandardSpecular s, float2 s
     UnityStandardDataToGbuffer(data, outGBuffer0, outGBuffer1, outGBuffer2);
     float4 emission = float4(s.Emission, 1);
     emission.rgb += c;
-    float perceptualRoughness = SmoothnessToPerceptualRoughness (1);
+    float perceptualRoughness = SmoothnessToPerceptualRoughness (s.Smoothness);  //Smoothness To roughness
     float roughness = PerceptualRoughnessToRoughness(perceptualRoughness);
     half surfaceReduction;
 #   ifdef UNITY_COLORSPACE_GAMMA
